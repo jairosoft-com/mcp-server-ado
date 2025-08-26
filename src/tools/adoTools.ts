@@ -1,5 +1,104 @@
 import { z } from "zod";
 
+export function listProjectsTool(token: string) {
+    return {
+        token,
+        name: "listProjects",
+        schema: {
+            top: z.number().optional().default(50).describe("Number of projects to return (default: 50, max: 200)"),
+            skip: z.number().optional().describe("Number of projects to skip for pagination"),
+            stateFilter: z.string().optional().describe("Filter projects by state (e.g., 'all', 'wellFormed', 'createPending', 'deleted', 'new', 'unchanged')")
+        },
+        handler: async ({
+            top = 50,
+            skip = 0,
+            stateFilter
+        }: {
+            top?: number;
+            skip?: number;
+            stateFilter?: string;
+        }) => {
+            try {
+                // Extract organization from token
+                const tokenPayload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+                const organization = tokenPayload.tid;
+                const baseUrl = `https://dev.azure.com/${organization}`;
+                
+                // Build the projects URL
+                let projectsUrl = `${baseUrl}/_apis/projects?api-version=7.1-preview.4&$top=${top}&$skip=${skip}`;
+                
+                // Add state filter if provided
+                if (stateFilter && stateFilter !== 'all') {
+                    projectsUrl += `&stateFilter=${encodeURIComponent(stateFilter)}`;
+                }
+
+                // Fetch projects
+                const response = await fetch(projectsUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(`Failed to fetch projects: ${error}`);
+                }
+
+                const data = await response.json() as ProjectsResponse;
+                const projects = data.value || [];
+
+                // Format the response
+                let responseText = `Found ${projects.length} projects\n\n`;
+                
+                if (projects.length > 0) {
+                    responseText += "Projects:\n";
+                    responseText += "=".repeat(50) + "\n\n";
+                    
+                    projects.forEach((project, index) => {
+                        responseText += `${index + 1}. ${project.name} (${project.id})\n`;
+                        responseText += `   State: ${project.state}\n`;
+                        responseText += `   URL: ${project.url.replace('_apis/projects/', '_projects/')}\n`;
+                        
+                        if (project.description) {
+                            responseText += `   Description: ${project.description}\n`;
+                        }
+                        
+                        responseText += `   Last Updated: ${new Date(project.lastUpdateTime).toLocaleString()}\n`;
+                        responseText += "\n" + "-".repeat(30) + "\n\n";
+                    });
+                }
+
+                // Add pagination info if available
+                if (data.count) {
+                    responseText += `\nTotal Projects: ${data.count}\n`;
+                }
+                
+                if (data.continuationToken) {
+                    responseText += `More projects available. Use 'skip' parameter to get the next page.\n`;
+                }
+
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: responseText
+                    }]
+                };
+            } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: `Error fetching projects: ${errorMessage}`
+                    }],
+                    isError: true
+                };
+            }
+        }
+    };
+}
+
+
 interface WorkItem {
     id: number;
     url: string;
@@ -34,6 +133,7 @@ interface Project {
 interface ProjectsResponse {
     count: number;
     value: Project[];
+    continuationToken?: string;
 }
 
 interface WorkItemReference {
@@ -114,44 +214,20 @@ export function listTicketsTool(token: string) {
                 const wiqlQuery = `${selectClause} FROM WorkItems ${whereClause} ${orderByClause}`;
 
                 // Determine the organization URL from the token
-                const organization = tokenPayload.tid; // Tenant ID
+                const organization = process.env.ADO_ORGANIZATION;
+                console.log("org: ", organization)
                 const baseUrl = `https://dev.azure.com/${organization}`;
                 
-                // If project is not provided, we need to get the list of projects first
-                let projects = [];
+                // If project is not provided, we'll search across all projects
                 if (!project) {
-                    const projectsResponse = await fetch(
-                        `${baseUrl}/_apis/project/collections?api-version=7.1-preview.4`, 
-                        {
-                            headers: {
-                                'Authorization': `Bearer ${token}`,
-                                'Content-Type': 'application/json'
-                            }
-                        }
-                    );
-                    
-                    if (!projectsResponse.ok) {
-                        throw new Error(`Failed to fetch projects: ${projectsResponse.statusText}`);
-                    }
-                    
-                    const projectsData = await projectsResponse.json() as ProjectsResponse;
-                    projects = projectsData.value || [];
-                    
-                    if (projects.length === 0) {
-                        return {
-                            content: [{
-                                type: "text" as const,
-                                text: "No projects found in your organization."
-                            }]
-                        };
-                    }
-                    
-                    // Use the first project if none specified
-                    project = projects[0].id;
+                    // If no project is specified, we'll search across all projects
+                    // by not including the project in the WIQL URL
+                    project = '';
                 }
 
                 // Execute the WIQL query
-                const wiqlUrl = `${baseUrl}/${project}${team ? `/${team}` : ''}/_apis/wit/wiql?api-version=7.1-preview.2`;
+                const projectPath = project ? `${project}/` : '';
+                const wiqlUrl = `${baseUrl}/${projectPath}${team ? `${team}/` : ''}_apis/wit/wiql?api-version=7.1-preview.2`;
                 const wiqlResponse = await fetch(wiqlUrl, {
                     method: 'POST',
                     headers: {

@@ -1,7 +1,7 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Env } from "./interface/adoInterfaces";
-import { listTicketsTool } from "./tools/adoTools";
+import { listTicketsTool, listProjectsTool } from "./tools/adoTools";
 
 // Define the Props type
 type Props = {
@@ -11,7 +11,7 @@ type Props = {
 // Extend your class with props support
 export class MyMCP extends McpAgent<Env, null, Props> {
 	server = new McpServer({
-		name: "Microsoft Chat Fetcher",
+		name: "Azure DevOps Tools",
 		version: "1.0.0",
 	});
 
@@ -20,16 +20,26 @@ export class MyMCP extends McpAgent<Env, null, Props> {
 			// Access token from this.props.bearerToken
 			const token = this.props.bearerToken;
 
+			// Initialize tools
 			const listTicketsToolInstance = listTicketsTool(token);
+			const listProjectsToolInstance = listProjectsTool(token);
 
+			// Register tools
 			this.server.tool(
 				listTicketsToolInstance.name,
 				listTicketsToolInstance.schema,
 				listTicketsToolInstance.handler
 			);
 
+			this.server.tool(
+				listProjectsToolInstance.name,
+				listProjectsToolInstance.schema,
+				listProjectsToolInstance.handler
+			);
+
 			console.log("Registered tools:", [
 				listTicketsToolInstance.name,
+				listProjectsToolInstance.name
 			].join(", "));
 		} catch (error) {
 			console.error("Error initializing MCP tools:", error);
