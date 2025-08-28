@@ -1,38 +1,42 @@
 import { z } from "zod";
+import { 
+    ProjectsResponse, 
+    WorkItemQueryResult, 
+    WorkItemsResponse 
+} from "../interface/adoInterfaces";
 
-export function listProjectsTool(token: string) {
+export function listProjectsTool(token: string, organization?: string) {
+    const org = organization || process.env.ADO_ORGANIZATION;
+    if (!org) throw new Error("Organization must be provided or set in ADO_ORGANIZATION");
+
     return {
         token,
         name: "listProjects",
         schema: {
             top: z.number().optional().default(50).describe("Number of projects to return (default: 50, max: 200)"),
-            skip: z.number().optional().describe("Number of projects to skip for pagination"),
+            continuationToken: z.string().optional().describe("Continuation token for pagination"),
             stateFilter: z.string().optional().describe("Filter projects by state (e.g., 'all', 'wellFormed', 'createPending', 'deleted', 'new', 'unchanged')")
         },
         handler: async ({
             top = 50,
-            skip = 0,
+            continuationToken,
             stateFilter
         }: {
             top?: number;
-            skip?: number;
+            continuationToken?: string;
             stateFilter?: string;
         }) => {
             try {
-                // Extract organization from token
-                const tokenPayload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-                const organization = tokenPayload.tid;
-                const baseUrl = `https://dev.azure.com/${organization}`;
-                
-                // Build the projects URL
-                let projectsUrl = `${baseUrl}/_apis/projects?api-version=7.1-preview.4&$top=${top}&$skip=${skip}`;
-                
-                // Add state filter if provided
+                const baseUrl = `https://dev.azure.com/${org}`;
+                let projectsUrl = `${baseUrl}/_apis/projects?api-version=7.1-preview.4&$top=${top}`;
+
+                if (continuationToken) {
+                    projectsUrl += `&continuationToken=${encodeURIComponent(continuationToken)}`;
+                }
                 if (stateFilter && stateFilter !== 'all') {
                     projectsUrl += `&stateFilter=${encodeURIComponent(stateFilter)}`;
                 }
 
-                // Fetch projects
                 const response = await fetch(projectsUrl, {
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -41,56 +45,33 @@ export function listProjectsTool(token: string) {
                 });
 
                 if (!response.ok) {
-                    const error = await response.text();
-                    throw new Error(`Failed to fetch projects: ${error}`);
+                    throw new Error(`Failed to fetch projects: ${await response.text()}`);
                 }
 
                 const data = await response.json() as ProjectsResponse;
                 const projects = data.value || [];
 
-                // Format the response
                 let responseText = `Found ${projects.length} projects\n\n`;
-                
-                if (projects.length > 0) {
-                    responseText += "Projects:\n";
-                    responseText += "=".repeat(50) + "\n\n";
-                    
-                    projects.forEach((project, index) => {
-                        responseText += `${index + 1}. ${project.name} (${project.id})\n`;
-                        responseText += `   State: ${project.state}\n`;
-                        responseText += `   URL: ${project.url.replace('_apis/projects/', '_projects/')}\n`;
-                        
-                        if (project.description) {
-                            responseText += `   Description: ${project.description}\n`;
-                        }
-                        
-                        responseText += `   Last Updated: ${new Date(project.lastUpdateTime).toLocaleString()}\n`;
-                        responseText += "\n" + "-".repeat(30) + "\n\n";
-                    });
-                }
 
-                // Add pagination info if available
-                if (data.count) {
-                    responseText += `\nTotal Projects: ${data.count}\n`;
-                }
-                
+                projects.forEach((project, index) => {
+                    responseText += `${index + 1}. ${project.name} (${project.id})\n`;
+                    responseText += `   State: ${project.state}\n`;
+                    responseText += `   URL: ${project.url.replace('_apis/projects/', '_projects/')}\n`;
+                    if (project.description) {
+                        responseText += `   Description: ${project.description}\n`;
+                    }
+                    responseText += `   Last Updated: ${new Date(project.lastUpdateTime).toLocaleString()}\n`;
+                    responseText += "\n" + "-".repeat(30) + "\n\n";
+                });
+
                 if (data.continuationToken) {
-                    responseText += `More projects available. Use 'skip' parameter to get the next page.\n`;
+                    responseText += `\nMore projects available. Use continuationToken=${data.continuationToken} to get next page.\n`;
                 }
 
-                return {
-                    content: [{
-                        type: "text" as const,
-                        text: responseText
-                    }]
-                };
+                return { content: [{ type: "text" as const, text: responseText }] };
             } catch (error: unknown) {
-                const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
                 return {
-                    content: [{
-                        type: "text" as const,
-                        text: `Error fetching projects: ${errorMessage}`
-                    }],
+                    content: [{ type: "text" as const, text: `Error fetching projects: ${error instanceof Error ? error.message : 'Unknown error occurred'}` }],
                     isError: true
                 };
             }
@@ -98,64 +79,7 @@ export function listProjectsTool(token: string) {
     };
 }
 
-
-interface WorkItem {
-    id: number;
-    url: string;
-    fields: {
-        'System.Title': string;
-        'System.WorkItemType': string;
-        'System.State': string;
-        'System.AssignedTo'?: {
-            displayName: string;
-            uniqueName: string;
-        };
-        'System.CreatedDate'?: string;
-        'System.ChangedDate'?: string;
-        'System.Description'?: string;
-        'System.Tags'?: string;
-        'Microsoft.VSTS.Common.Priority'?: number;
-        'Microsoft.VSTS.Common.Severity'?: string;
-    };
-}
-
-interface Project {
-    id: string;
-    name: string;
-    description?: string;
-    url: string;
-    state: string;
-    revision: number;
-    visibility: string;
-    lastUpdateTime: string;
-}
-
-interface ProjectsResponse {
-    count: number;
-    value: Project[];
-    continuationToken?: string;
-}
-
-interface WorkItemReference {
-    id: number;
-    url: string;
-}
-
-interface WorkItemQueryResult {
-    queryType: string;
-    queryResultType: string;
-    asOf: string;
-    workItems: WorkItemReference[];
-    workItemRelations?: any[];
-}
-
-interface WorkItemsResponse {
-    count: number;
-    value: WorkItem[];
-    continuationToken?: string;
-}
-
-export function listTicketsTool(token: string) {
+export function listTicketsTool(token: string, organization?: string) {
     return {
         token,
         name: "listTickets",
@@ -183,6 +107,7 @@ export function listTicketsTool(token: string) {
             states?: string[];
         }) => {
             try {
+                const org = organization || process.env.ADO_ORGANIZATION;
                 // Extract user information from the token
                 const tokenPayload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
                 const userEmail = tokenPayload.unique_name || tokenPayload.upn;
@@ -214,8 +139,6 @@ export function listTicketsTool(token: string) {
                 const wiqlQuery = `${selectClause} FROM WorkItems ${whereClause} ${orderByClause}`;
 
                 // Determine the organization URL from the token
-                const organization = process.env.ADO_ORGANIZATION;
-                console.log("org: ", organization)
                 const baseUrl = `https://dev.azure.com/${organization}`;
                 
                 // If project is not provided, we'll search across all projects

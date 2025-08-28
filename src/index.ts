@@ -19,10 +19,11 @@ export class MyMCP extends McpAgent<Env, null, Props> {
 		try {
 			// Access token from this.props.bearerToken
 			const token = this.props.bearerToken;
+			const organization = process.env.ADO_ORGANIZATION || "jairo";
 
 			// Initialize tools
-			const listTicketsToolInstance = listTicketsTool(token);
-			const listProjectsToolInstance = listProjectsTool(token);
+			const listTicketsToolInstance = listTicketsTool(token, organization);
+			const listProjectsToolInstance = listProjectsTool(token, organization);
 
 			// Register tools
 			this.server.tool(
