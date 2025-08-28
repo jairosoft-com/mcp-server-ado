@@ -20,6 +20,7 @@ export interface WorkItem {
         'System.Tags'?: string;
         'Microsoft.VSTS.Common.Priority'?: number;
         'Microsoft.VSTS.Common.Severity'?: string;
+        'System.IterationPath'?: string;
     };
 }
 
@@ -58,3 +59,26 @@ export interface WorkItemsResponse {
     value: WorkItem[];
     continuationToken?: string;
 }
+
+// Types for ADO responses
+export type AdoListResponse<T> = {
+    count: number;
+    value: T[];
+  };
+  
+export type AdoProject = {
+    id: string;
+    name: string;
+    description?: string;
+    url: string;
+  };
+  
+export type AdoTeam = {
+    id: string;
+    name: string;
+    description?: string;
+    url: string;
+    projectName: string;
+    projectId: string;
+  };
+  
