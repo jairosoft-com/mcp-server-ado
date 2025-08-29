@@ -20,6 +20,8 @@ export interface WorkItem {
         'System.Tags'?: string;
         'Microsoft.VSTS.Common.Priority'?: number;
         'Microsoft.VSTS.Common.Severity'?: string;
+        'Microsoft.VSTS.Common.AcceptanceCriteria'?: string;
+        'System.History'?: string;
         'System.IterationPath'?: string;
     };
 }

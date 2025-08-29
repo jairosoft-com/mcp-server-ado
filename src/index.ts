@@ -1,7 +1,7 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Env } from "./interface/adoInterfaces";
-import {  listProjectsTool, listTeamsTool, listWorkItemsTool, } from "./tools/adoTools";
+import {  listProjectsTool, listTeamsTool, listWorkItemsTool, getWorkItemDetailsTool} from "./tools/adoTools";
 
 // Define the Props type
 type Props = {
@@ -25,19 +25,19 @@ export class MyMCP extends McpAgent<Env, null, Props> {
 			const listWorkItemsInstance = listWorkItemsTool(token, organization);
 			const listProjectsToolInstance = listProjectsTool(token, organization);
 			const listTeamsToolInstance = listTeamsTool(token, organization);
-
+			const getWorkItemDetailsToolInstance = getWorkItemDetailsTool(token, organization);
 
 			// Register tools
-			this.server.tool(
-				listTeamsToolInstance.name,
-				listTeamsToolInstance.schema,
-				listTeamsToolInstance.handler
-			);
-
 			this.server.tool(
 				listProjectsToolInstance.name,
 				listProjectsToolInstance.schema,
 				listProjectsToolInstance.handler
+			);
+
+			this.server.tool(
+				listTeamsToolInstance.name,
+				listTeamsToolInstance.schema,
+				listTeamsToolInstance.handler
 			);
 
 			this.server.tool(
@@ -46,9 +46,17 @@ export class MyMCP extends McpAgent<Env, null, Props> {
 				listWorkItemsInstance.handler
 			);
 
+			this.server.tool(
+				getWorkItemDetailsToolInstance.name,
+				getWorkItemDetailsToolInstance.schema,
+				getWorkItemDetailsToolInstance.handler
+			);
+
 			console.log("Registered tools:", [
 				listWorkItemsInstance.name,
-				listProjectsToolInstance.name
+				listProjectsToolInstance.name,
+				listTeamsToolInstance.name,
+				getWorkItemDetailsToolInstance.name
 			].join(", "));
 		} catch (error) {
 			console.error("Error initializing MCP tools:", error);

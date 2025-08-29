@@ -4,6 +4,7 @@ import {
     AdoProject,
     AdoTeam,
     ProjectsResponse, 
+    WorkItem, 
     WorkItemQueryResult, 
     WorkItemsResponse 
 } from "../interface/adoInterfaces";
@@ -306,4 +307,139 @@ function findClosestMatch<T extends { name: string; id: string }>(list: T[], que
       }
     };
   }
+
+  /**
+ * Converts ADO rich text fields (HTML) into plain text.
+ * - Removes tags
+ * - Keeps line breaks for <p>, <li>, <br>
+ * - Keeps bullets for <li>
+ */
+  export function parseWorkItemHtml(html?: string): string {
+    if (!html) return "";
+
+    return html
+      // normalize <br> and </p> as line breaks
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      // add bullet before list items
+      .replace(/<li[^>]*>/gi, "• ")
+      .replace(/<\/li>/gi, "\n")
+      // remove all other tags
+      .replace(/<[^>]+>/g, "")
+      // decode HTML entities (basic ones)
+      .replace(/&nbsp;/g, " ")
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      // collapse multiple line breaks
+      .replace(/\n{2,}/g, "\n")
+      .trim();
+  }
+
+  export function getWorkItemDetailsTool(token: string, organization?: string) {
+    return {
+      token,
+      name: "getWorkItemDetails",
+      schema: {
+        ids: z.union([z.number(), z.array(z.number())])
+          .describe("One or more work item IDs to fetch details for")
+      },
+      handler: async ({ ids }: { ids: number | number[] }) => {
+        try {
+          const org = organization || process.env.ADO_ORGANIZATION;
+          if (!org) throw new Error("Organization name is required.");
+  
+          const idList = Array.isArray(ids) ? ids : [ids];
+          const baseUrl = `https://dev.azure.com/${org}`;
+          const url = `${baseUrl}/_apis/wit/workitems?ids=${idList.join(",")}&$expand=all&api-version=7.1-preview.3`;
+  
+          const response = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json"
+            }
+          });
+  
+          if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Failed to fetch work item details: ${error}`);
+          }
+  
+          const data = (await response.json()) as WorkItemsResponse;
+          if (!data.value || data.value.length === 0) {
+            return {
+              content: [{ type: "text" as const, text: "No work items found for the given IDs." }]
+            };
+          }
+  
+          let responseText = `📌 Work Item Details (${data.count})\n`;
+          responseText += "=".repeat(50) + "\n\n";
+  
+          for (const workItem of data.value) {
+            const fields = workItem.fields;
+  
+            responseText += `ID: ${workItem.id}\n`;
+            responseText += `Title: ${fields["System.Title"]}\n`;
+            responseText += `Type: ${fields["System.WorkItemType"]}\n`;
+            responseText += `State: ${fields["System.State"]}\n`;
+            responseText += `Assigned To: ${fields["System.AssignedTo"]?.displayName || "Unassigned"}\n`;
+            responseText += `Iteration: ${fields["System.IterationPath"] || "N/A"}\n`;
+            responseText += `Priority: ${fields["Microsoft.VSTS.Common.Priority"] || "N/A"}\n`;
+            responseText += `Severity: ${fields["Microsoft.VSTS.Common.Severity"] || "N/A"}\n`;
+            responseText += `Created: ${fields["System.CreatedDate"] || "N/A"}\n`;
+            responseText += `Changed: ${fields["System.ChangedDate"] || "N/A"}\n`;
+            responseText += `Tags: ${fields["System.Tags"] || "None"}\n\n`;
+  
+            if (fields["System.Description"]) {
+              responseText += `📝 Description:\n${parseWorkItemHtml(fields["System.Description"])}\n\n`;
+            }
+  
+            // ✅ Acceptance Criteria (if exists as custom field)
+            if ((fields as any)["Microsoft.VSTS.Common.AcceptanceCriteria"]) {
+              responseText += `✅ Acceptance Criteria:\n${parseWorkItemHtml((fields as any)["Microsoft.VSTS.Common.AcceptanceCriteria"])}\n\n`;
+            }
+  
+            // 💬 Discussion (comments endpoint)
+            const discussionUrl = `${baseUrl}/_apis/wit/workItems/${workItem.id}/comments?api-version=7.1-preview.3`;
+            const discussionResp = await fetch(discussionUrl, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json"
+              }
+            });
+  
+            if (discussionResp.ok) {
+              const discussionData = (await discussionResp.json()) as { comments: { createdBy: { displayName: string }; text: string }[] };
+              const comments = discussionData.comments || [];
+              if (comments.length > 0) {
+                responseText += `💬 Discussion:\n`;
+                comments.forEach((c: any, i: number) => {
+                  responseText += `   ${i + 1}. ${c.createdBy.displayName}: ${c.text?.replace(/<[^>]+>/g, "")}\n`;
+                });
+                responseText += "\n";
+              }
+            }
+  
+            responseText += `🔗 URL: ${workItem.url.replace("_apis/wit/workItems", "_workitems/edit")}\n`;
+            responseText += "-".repeat(50) + "\n\n";
+          }
+  
+          return {
+            content: [{ type: "text" as const, text: responseText }]
+          };
+  
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+          return {
+            content: [{ type: "text" as const, text: `Error fetching work item details: ${errorMessage}` }],
+            isError: true
+          };
+        }
+      }
+    };
+  }
+  
+  
+  
   
